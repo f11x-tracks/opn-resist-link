@@ -4,6 +4,8 @@ import csv, re
 from datetime import datetime
 import os
 
+directory = f'//f21pucnasn1.f21prod.mfg.intel.com/FuzionUploads/Litho/Tracks/dash-OPN-ENTITY-RCP-CHEM/'
+
 sql_opn = """
 SELECT 
           eo.entity AS entity
@@ -60,6 +62,9 @@ except:
     print('Cannot run SQL script - Consider connecting to VPN')
 
 vendord = {
+    'CIX': 'UTX',
+    'CNP': 'CNP',
+    'UTX': 'UTX',
     'SCJ': 'ASML',
     'SBH': 'ASML',
     'SDJ': 'ASML',
@@ -107,8 +112,6 @@ new_rows = []
 # Iterate through each row in df_opn
 for opn_index, opn_row in df_opn.iterrows():
     matching_rows = df_master[df_master['OPERATION'] == opn_row['OPERATION']]
-    if opn_row['OPERATION'] == '227861':
-        print('found it')
     for master_index, master_row in matching_rows.iterrows():
         if wildcard_match(master_row['ENTITY'], opn_row['ENTITY']):
             entity_prefix = opn_row['ENTITY'][:3]
@@ -130,5 +133,69 @@ for opn_index, opn_row in df_opn.iterrows():
 # Concatenate the new rows to df_master
 df_master = pd.concat([df_master, pd.DataFrame(new_rows)], ignore_index=True)
 
+df_master = df_master.sort_values(by=['DOTPROCESS', 'OPERATION', 'ENTITY_OPN'])
+# Move 'PARAMETER_LIST' column to the end
+cols = [col for col in df_master.columns if col != 'PARAMETER_LIST'] + ['PARAMETER_LIST']
+df_master = df_master[cols]
+# Specify the new order of columns with important columns first
+new_order = ['DOTPROCESS', 'OPER_SHORT_DESC', 'OPERATION', 'ENTITY_OPN', 'ENTITY', 'TRACK_RECIPE', 'CHEMICALS'] + \
+            [col for col in df_master.columns if col not in ['DOTPROCESS', 'OPER_SHORT_DESC', 'OPERATION', 'ENTITY_OPN', 'ENTITY', 'TRACK_RECIPE', 'CHEMICALS']]
+
+# Reorder the columns in df_master
+df_master = df_master[new_order]
+
+
 # Save the updated df_master to an Excel file
-df_master.to_excel('df_master.xlsx', index=False)
+df_master.to_excel(f"{directory}/OPN-ENTITY-RCP-CHEM.xlsx", index=False)
+
+# Create an HTML table with filterable columns
+html_table = df_master.to_html(index=False, classes='filterable')
+# Define the JavaScript code
+javascript = """
+<script>
+// Get all the headers
+var headers = document.querySelectorAll('.filterable th');
+// For each header
+headers.forEach(function(header, index) {
+    // Create a text box
+    var textBox = document.createElement('input');
+    // When something is typed in the text box
+    textBox.onkeyup = function() {
+        // Get the rows
+        var rows = document.querySelectorAll('.filterable tbody tr');
+        // For each row
+        rows.forEach(function(row) {
+            // If the text box is empty or its content is found in the corresponding cell
+            if (textBox.value === '' || row.cells[index].textContent.includes(textBox.value)) {
+                // Show the row
+                row.style.display = '';
+            } else {
+                // Hide the row
+                row.style.display = 'none';
+            }
+        });
+    };
+    // Add the text box to the header
+    header.appendChild(textBox);
+});
+</script>
+"""
+# Add the JavaScript code to the HTML table
+html_table += javascript
+
+# Write the HTML table to a file with retry logic
+output_path = f"{directory}/table/OPN-ENTITY-RCP-CHEM.html"
+max_retries = 5
+retry_delay = 2  # seconds
+
+for attempt in range(max_retries):
+    try:
+        with open(output_path, 'w') as f:
+            f.write(html_table)
+        print(f"File written successfully to {output_path}")
+        break
+    except PermissionError:
+        print(f"PermissionError: Attempt {attempt + 1} of {max_retries}. Retrying in {retry_delay} seconds...")
+        time.sleep(retry_delay)
+else:
+    print(f"Failed to write file after {max_retries} attempts. Please ensure the file is not open in another application.")
